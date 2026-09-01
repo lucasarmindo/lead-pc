@@ -379,16 +379,6 @@ function formatBytes(bytes) {
   return i === 0 ? `${size} ${units[i]}` : `${size.toFixed(2)} ${units[i]}`;
 }
 
-async function flushDns() {
-  setStatus("Limpando cache de DNS...");
-  try {
-    const msg = await invoke("flush_dns");
-    setStatus(msg, "success");
-  } catch (e) {
-    setStatus(`Erro: ${e}`, "error");
-  }
-}
-
 selectAllEl.addEventListener("change", () => {
   const checked = selectAllEl.checked;
   listEl.querySelectorAll("input[type=checkbox]").forEach((el) => {
@@ -398,7 +388,6 @@ selectAllEl.addEventListener("change", () => {
 
 document.querySelector("#btn-scan").addEventListener("click", scan);
 document.querySelector("#btn-clean").addEventListener("click", clean);
-document.querySelector("#btn-flush-dns").addEventListener("click", flushDns);
 
 // ---------- Otimizações para gamers ----------
 
@@ -647,6 +636,149 @@ document.querySelector("#btn-open-devmgmt").addEventListener("click", () => {
 });
 
 scanDevices();
+
+// ---------- Rede ----------
+
+const networkStatusEl = document.querySelector("#network-status");
+const netAdapterEl = document.querySelector("#net-adapter");
+const netLocalIpEl = document.querySelector("#net-local-ip");
+const netGatewayEl = document.querySelector("#net-gateway");
+const netDnsEl = document.querySelector("#net-dns");
+const netPublicIpEl = document.querySelector("#net-public-ip");
+const netPingEl = document.querySelector("#net-ping");
+const netDownloadEl = document.querySelector("#net-download");
+
+function setNetworkStatus(text, kind = "") {
+  networkStatusEl.textContent = text;
+  networkStatusEl.className = "status" + (kind ? ` ${kind}` : "");
+}
+
+async function loadNetworkStatus() {
+  netAdapterEl.textContent = "verificando...";
+  netLocalIpEl.textContent = "verificando...";
+  netGatewayEl.textContent = "verificando...";
+  netDnsEl.textContent = "verificando...";
+  try {
+    const info = await invoke("get_network_status");
+    netAdapterEl.textContent = info.adapter || "—";
+    netLocalIpEl.textContent = info.local_ip || "—";
+    netGatewayEl.textContent = info.gateway || "—";
+    netDnsEl.textContent = info.dns || "—";
+  } catch (e) {
+    setNetworkStatus(`Erro: ${e}`, "error");
+  }
+}
+
+document.querySelector("#btn-scan-network").addEventListener("click", loadNetworkStatus);
+document.querySelector("#btn-public-ip").addEventListener("click", async () => {
+  netPublicIpEl.textContent = "verificando...";
+  try {
+    netPublicIpEl.textContent = await invoke("get_public_ip");
+  } catch (e) {
+    netPublicIpEl.textContent = "erro";
+    setNetworkStatus(`Erro: ${e}`, "error");
+  }
+});
+document.querySelector("#btn-open-netconn").addEventListener("click", () => {
+  invoke("open_network_connections").catch((e) => setNetworkStatus(`Erro: ${e}`, "error"));
+});
+
+document.querySelector("#btn-flush-dns").addEventListener("click", async () => {
+  setNetworkStatus("Limpando cache de DNS...");
+  try {
+    setNetworkStatus(await invoke("flush_dns"), "success");
+  } catch (e) {
+    setNetworkStatus(`Erro: ${e}`, "error");
+  }
+});
+
+async function applyDns(provider) {
+  setNetworkStatus("Aplicando configuração de DNS... uma janela de permissão pode aparecer.");
+  try {
+    const msg = await invoke("set_dns", { provider });
+    setNetworkStatus(msg, "success");
+    await loadNetworkStatus();
+  } catch (e) {
+    setNetworkStatus(`Erro: ${e}`, "error");
+  }
+}
+document.querySelector("#btn-dns-google").addEventListener("click", () => applyDns("google"));
+document.querySelector("#btn-dns-cloudflare").addEventListener("click", () => applyDns("cloudflare"));
+document.querySelector("#btn-dns-auto").addEventListener("click", () => applyDns("auto"));
+
+document.querySelector("#btn-ip-release").addEventListener("click", async () => {
+  setNetworkStatus("Liberando IP... uma janela de permissão pode aparecer.");
+  try {
+    setNetworkStatus(await invoke("release_ip"), "success");
+  } catch (e) {
+    setNetworkStatus(`Erro: ${e}`, "error");
+  }
+});
+document.querySelector("#btn-ip-renew").addEventListener("click", async () => {
+  setNetworkStatus("Renovando IP... uma janela de permissão pode aparecer.");
+  try {
+    setNetworkStatus(await invoke("renew_ip"), "success");
+    await loadNetworkStatus();
+  } catch (e) {
+    setNetworkStatus(`Erro: ${e}`, "error");
+  }
+});
+
+document.querySelector("#btn-speedtest").addEventListener("click", async () => {
+  netPingEl.textContent = "medindo...";
+  netDownloadEl.textContent = "medindo...";
+  setNetworkStatus("Testando velocidade... baixa ~120 MB em paralelo, pode levar alguns segundos.");
+  try {
+    const result = await invoke("run_speed_test");
+    netPingEl.textContent = `${result.ping_ms} ms`;
+    netDownloadEl.textContent = `${result.download_mbps} Mbps`;
+    setNetworkStatus("Teste de velocidade concluído.", "success");
+  } catch (e) {
+    netPingEl.textContent = "—";
+    netDownloadEl.textContent = "—";
+    setNetworkStatus(`Erro: ${e}`, "error");
+  }
+});
+
+document.querySelector("#btn-network-reset").addEventListener("click", async () => {
+  const ok = window.confirm(
+    "Isso reseta o Winsock e a pilha TCP/IP do Windows. É seguro, mas exige reiniciar o PC para valer. Continuar?"
+  );
+  if (!ok) return;
+  setNetworkStatus("Resetando rede... uma janela de permissão pode aparecer.");
+  try {
+    setNetworkStatus(await invoke("reset_network_stack"), "success");
+  } catch (e) {
+    setNetworkStatus(`Erro: ${e}`, "error");
+  }
+});
+
+loadNetworkStatus();
+
+// ---------- Gauges (somente visual) ----------
+// Observa o texto já renderizado dos medidores e reflete o valor no arco SVG
+// (--pct) e nas faixas de cor (is-warn / is-crit). Não altera nenhuma lógica.
+
+(function syncGaugeArcs() {
+  const applyGauge = (el) => {
+    const box = el.closest(".gauge");
+    if (!box) return;
+    const pct = Math.max(0, Math.min(100, parseFloat(el.textContent) || 0));
+    box.style.setProperty("--pct", pct);
+    box.classList.toggle("is-warn", pct >= 75 && pct < 90);
+    box.classList.toggle("is-crit", pct >= 90);
+  };
+
+  for (const el of [perfCpuEl, perfMemEl, perfDiskEl]) {
+    if (!el) continue;
+    new MutationObserver(() => applyGauge(el)).observe(el, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+    applyGauge(el);
+  }
+})();
 
 let usbDebounceTimer = null;
 window.__TAURI__.event.listen("usb-changed", () => {

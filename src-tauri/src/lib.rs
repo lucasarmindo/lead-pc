@@ -1145,6 +1145,217 @@ fn stop_perf_monitor(state: tauri::State<PerfWatcherState>) -> Result<(), String
     Ok(())
 }
 
+// ---------- Rede ----------
+
+#[derive(Serialize)]
+struct NetworkStatus {
+    adapter: String,
+    local_ip: String,
+    gateway: String,
+    dns: String,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct RawNetworkStatus {
+    #[serde(rename = "Adapter")]
+    adapter: Option<String>,
+    #[serde(rename = "LocalIp")]
+    local_ip: Option<String>,
+    #[serde(rename = "Gateway")]
+    gateway: Option<String>,
+    #[serde(rename = "Dns")]
+    dns: Option<String>,
+}
+
+#[tauri::command]
+fn get_network_status() -> Result<NetworkStatus, String> {
+    let script = r#"
+        $cfg = Get-NetIPConfiguration | Where-Object { $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1
+        if (-not $cfg) { '{}' } else {
+            $dns = ($cfg.DNSServer | Where-Object { $_.AddressFamily -eq 2 } | Select-Object -ExpandProperty ServerAddresses) -join ', '
+            [PSCustomObject]@{
+                Adapter = $cfg.InterfaceAlias
+                LocalIp = ($cfg.IPv4Address.IPAddress -join ', ')
+                Gateway = ($cfg.IPv4DefaultGateway.NextHop -join ', ')
+                Dns = $dns
+            } | ConvertTo-Json -Compress
+        }
+    "#;
+    let out = run_hidden(
+        "powershell",
+        &["-NoProfile", "-NonInteractive", "-Command", script],
+    )
+    .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let trimmed = text.trim();
+    let raw: RawNetworkStatus = if trimmed.is_empty() || trimmed == "{}" {
+        RawNetworkStatus::default()
+    } else {
+        serde_json::from_str(trimmed).map_err(|e| e.to_string())?
+    };
+    Ok(NetworkStatus {
+        adapter: raw.adapter.unwrap_or_else(|| "Desconhecido".into()),
+        local_ip: raw.local_ip.unwrap_or_default(),
+        gateway: raw.gateway.unwrap_or_default(),
+        dns: raw.dns.unwrap_or_default(),
+    })
+}
+
+#[tauri::command]
+fn get_public_ip() -> Result<String, String> {
+    let out = run_hidden(
+        "powershell",
+        &[
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "(Invoke-RestMethod -Uri 'https://api.ipify.org' -TimeoutSec 6)",
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err("Não foi possível obter o IP público (sem internet?).".into());
+    }
+    let ip = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if ip.is_empty() {
+        return Err("Não foi possível obter o IP público.".into());
+    }
+    Ok(ip)
+}
+
+fn active_interface_alias() -> Result<String, String> {
+    let out = run_hidden(
+        "powershell",
+        &[
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "(Get-NetIPConfiguration | Where-Object { $_.NetAdapter.Status -eq 'Up' } | Select-Object -First 1 -ExpandProperty InterfaceAlias)",
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    let alias = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if alias.is_empty() {
+        return Err("Não foi possível identificar o adaptador de rede ativo.".into());
+    }
+    Ok(alias)
+}
+
+#[tauri::command]
+fn set_dns(provider: String) -> Result<String, String> {
+    let alias = active_interface_alias()?.replace('"', "");
+    let inner = match provider.as_str() {
+        "google" => {
+            format!("Set-DnsClientServerAddress -InterfaceAlias \"{alias}\" -ServerAddresses ('8.8.8.8','8.8.4.4')")
+        }
+        "cloudflare" => {
+            format!("Set-DnsClientServerAddress -InterfaceAlias \"{alias}\" -ServerAddresses ('1.1.1.1','1.0.0.1')")
+        }
+        "auto" => {
+            format!("Set-DnsClientServerAddress -InterfaceAlias \"{alias}\" -ResetServerAddresses")
+        }
+        _ => return Err("Provedor de DNS inválido.".into()),
+    };
+    run_elevated_capture("powershell.exe", &["-NoProfile", "-Command", &inner])?;
+    Ok(match provider.as_str() {
+        "google" => "DNS definido para Google (8.8.8.8 / 8.8.4.4).".into(),
+        "cloudflare" => "DNS definido para Cloudflare (1.1.1.1 / 1.0.0.1).".into(),
+        _ => "DNS definido para automático (DHCP).".into(),
+    })
+}
+
+#[tauri::command]
+fn release_ip() -> Result<String, String> {
+    run_elevated_capture("ipconfig.exe", &["/release"])?;
+    Ok("IP liberado.".into())
+}
+
+#[tauri::command]
+fn renew_ip() -> Result<String, String> {
+    run_elevated_capture("ipconfig.exe", &["/renew"])?;
+    Ok("IP renovado.".into())
+}
+
+#[derive(Serialize)]
+struct SpeedTestResult {
+    ping_ms: f64,
+    download_mbps: f64,
+}
+
+#[tauri::command]
+fn run_speed_test() -> Result<SpeedTestResult, String> {
+    let script = r#"
+        $ProgressPreference = 'SilentlyContinue'
+        $pingMs = 0
+        try {
+            $p = Test-Connection -ComputerName 1.1.1.1 -Count 4 -ErrorAction Stop
+            $pingMs = ($p | Measure-Object -Property ResponseTime -Average).Average
+        } catch {}
+        $mbps = 0
+        try {
+            Add-Type -AssemblyName System.Net.Http
+            $client = New-Object System.Net.Http.HttpClient
+            $client.Timeout = [TimeSpan]::FromSeconds(30)
+            $url = "https://speed.cloudflare.com/__down?bytes=30000000"
+            $streams = 4
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            $tasks = for ($i = 0; $i -lt $streams; $i++) { $client.GetByteArrayAsync($url) }
+            [System.Threading.Tasks.Task]::WaitAll($tasks)
+            $sw.Stop()
+            $totalBytes = ($tasks | ForEach-Object { $_.Result.Length } | Measure-Object -Sum).Sum
+            $seconds = $sw.Elapsed.TotalSeconds
+            if ($seconds -gt 0) { $mbps = [math]::Round((($totalBytes * 8) / ($seconds * 1000000)), 2) }
+        } catch {}
+        [PSCustomObject]@{ PingMs = [math]::Round($pingMs,0); DownloadMbps = $mbps } | ConvertTo-Json -Compress
+    "#;
+    let out = run_hidden(
+        "powershell",
+        &["-NoProfile", "-NonInteractive", "-Command", script],
+    )
+    .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    #[derive(serde::Deserialize)]
+    struct Raw {
+        #[serde(rename = "PingMs")]
+        ping_ms: f64,
+        #[serde(rename = "DownloadMbps")]
+        download_mbps: f64,
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+    let raw: Raw = serde_json::from_str(text.trim()).map_err(|e| e.to_string())?;
+    Ok(SpeedTestResult {
+        ping_ms: raw.ping_ms,
+        download_mbps: raw.download_mbps,
+    })
+}
+
+#[tauri::command]
+fn open_network_connections() -> Result<(), String> {
+    Command::new("control")
+        .arg("ncpa.cpl")
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn reset_network_stack() -> Result<String, String> {
+    let out = run_elevated_capture(
+        "powershell.exe",
+        &["-NoProfile", "-Command", "netsh winsock reset; netsh int ip reset"],
+    )?;
+    if out.trim().is_empty() {
+        Ok("Reset de rede concluído. Reinicie o PC para aplicar.".into())
+    } else {
+        Ok(format!("{}\n\nReinicie o PC para aplicar.", out.trim()))
+    }
+}
+
 fn start_usb_watcher(app: tauri::AppHandle) {
     let script = r#"
         $query = New-Object System.Management.WqlEventQuery("SELECT * FROM __InstanceOperationEvent WITHIN 1 WHERE TargetInstance ISA 'Win32_PnPEntity'")
@@ -1219,7 +1430,15 @@ pub fn run() {
             get_reliability_events,
             get_boot_info,
             start_perf_monitor,
-            stop_perf_monitor
+            stop_perf_monitor,
+            get_network_status,
+            get_public_ip,
+            set_dns,
+            release_ip,
+            renew_ip,
+            run_speed_test,
+            open_network_connections,
+            reset_network_stack
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

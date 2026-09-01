@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="pt-br">
+  <head>
+    <meta charset="UTF-8" />
+    <title>LeadPC</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <nav class="sidebar">
+        <div class="brand">LeadPC</div>
+        <button class="tab-btn active" data-tab="limpeza">Limpeza</button>
+        <button class="tab-btn" data-tab="inicializacao">Inicialização</button>
+        <button class="tab-btn" data-tab="gamer">Gamer</button>
+        <button class="tab-btn" data-tab="reparo">Reparo</button>
+        <button class="tab-btn" data-tab="confiabilidade">Confiabilidade</button>
+        <button class="tab-btn" data-tab="desempenho">Desempenho</button>
+        <button class="tab-btn" data-tab="dispositivos">USB</button>
+      </nav>
+
+      <main class="content">
+        <section id="tab-limpeza" class="tab-panel active">
+          <h1>Limpeza</h1>
+          <p class="subtitle">Escolha o que limpar. Nada é apagado até você clicar em "Limpar selecionados".</p>
+
+          <div class="toolbar">
+            <label class="select-all">
+              <input type="checkbox" id="select-all" />
+              Selecionar tudo
+            </label>
+            <div class="toolbar-buttons">
+              <button id="btn-scan" class="secondary">Atualizar</button>
+              <button id="btn-flush-dns" class="secondary">Limpar cache DNS</button>
+            </div>
+          </div>
+
+          <div class="scroll-area">
+            <ul id="category-list" class="category-list"></ul>
+
+            <section class="panel">
+              <h3>Limpeza avançada</h3>
+              <div class="toggle-row">
+                <span>
+                  Windows.old
+                  <small class="hint" id="windowsold-size">verificando...</small>
+                </span>
+                <button id="btn-remove-windowsold" class="secondary">Remover</button>
+              </div>
+              <div class="toggle-row">
+                <span>
+                  Hibernação
+                  <small class="hint" id="hiber-size">verificando...</small>
+                </span>
+                <label class="switch">
+                  <input type="checkbox" id="toggle-hibernation" />
+                  <span class="slider"></span>
+                </label>
+              </div>
+              <div class="toggle-row">
+                <span>Componentes do Windows (WinSxS)</span>
+                <div class="toolbar-buttons">
+                  <button id="btn-analyze-winsxs" class="secondary">Analisar</button>
+                  <button id="btn-clean-winsxs" class="secondary">Limpar</button>
+                </div>
+              </div>
+              <pre id="winsxs-output" class="repair-list"></pre>
+              <div id="deepspace-status" class="status"></div>
+            </section>
+          </div>
+
+          <div class="bottom-bar">
+            <div id="status" class="status"></div>
+            <button id="btn-clean" class="primary">Limpar selecionados</button>
+          </div>
+        </section>
+
+        <section id="tab-inicializacao" class="tab-panel">
+          <h1>Inicialização</h1>
+          <p class="subtitle">Programas e tarefas que iniciam junto com o Windows.</p>
+          <div class="toolbar">
+            <div></div>
+            <div class="toolbar-buttons">
+              <button id="btn-scan-startup" class="secondary">Atualizar</button>
+            </div>
+          </div>
+          <ul id="startup-list" class="category-list scroll-area"></ul>
+          <div id="startup-status" class="status"></div>
+        </section>
+
+        <section id="tab-gamer" class="tab-panel">
+          <h1>Otimizações para gamers</h1>
+
+          <section class="panel">
+            <h3>Plano de energia</h3>
+            <ul id="power-plan-list" class="plan-list"></ul>
+            <button id="btn-ultimate" class="secondary">Habilitar e ativar "Desempenho Máximo"</button>
+          </section>
+
+          <section class="panel">
+            <h3>Modo de Jogo e Game Bar</h3>
+            <div class="toggle-row">
+              <span>Modo de Jogo (Game Mode)</span>
+              <label class="switch">
+                <input type="checkbox" id="toggle-game-mode" />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <span>Gravação em segundo plano (Xbox Game Bar / Game DVR)</span>
+              <label class="switch">
+                <input type="checkbox" id="toggle-game-dvr" />
+                <span class="slider"></span>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <span>
+                Agendamento de GPU acelerado por hardware (HAGS)
+                <small class="hint">precisa de admin + reiniciar o PC</small>
+              </span>
+              <label class="switch">
+                <input type="checkbox" id="toggle-hags" />
+                <span class="slider"></span>
+              </label>
+            </div>
+          </section>
+
+          <div id="gamer-status" class="status"></div>
+        </section>
+
+        <section id="tab-reparo" class="tab-panel">
+          <h1>Reparo do sistema</h1>
+          <p class="subtitle">
+            Verifica e repara arquivos de sistema corrompidos com <code>sfc</code> e <code>DISM</code>.
+            Pode levar vários minutos e vai pedir permissão de administrador (UAC).
+          </p>
+          <section class="panel">
+            <div class="toolbar-buttons">
+              <button id="btn-sfc" class="secondary">Rodar sfc /scannow</button>
+              <button id="btn-dism" class="secondary">Rodar DISM RestoreHealth</button>
+              <button id="btn-repairs" class="secondary">Ver últimos reparos</button>
+            </div>
+            <div id="repair-status" class="status"></div>
+            <ul id="repair-list" class="repair-list scroll-area"></ul>
+          </section>
+        </section>
+
+        <section id="tab-confiabilidade" class="tab-panel">
+          <h1>Confiabilidade</h1>
+          <p class="subtitle" id="boot-info-line">Verificando...</p>
+          <div class="toolbar">
+            <div></div>
+            <div class="toolbar-buttons">
+              <button id="btn-scan-reliability" class="secondary">Atualizar</button>
+            </div>
+          </div>
+          <ul id="reliability-list" class="category-list scroll-area"></ul>
+          <div id="reliability-status" class="status"></div>
+        </section>
+
+        <section id="tab-desempenho" class="tab-panel">
+          <h1>Desempenho</h1>
+          <div class="perf-gauges">
+            <div class="gauge">
+              <div class="gauge-value" id="perf-cpu">--%</div>
+              <div class="gauge-label">CPU</div>
+            </div>
+            <div class="gauge">
+              <div class="gauge-value" id="perf-mem">--%</div>
+              <div class="gauge-label">RAM</div>
+            </div>
+            <div class="gauge">
+              <div class="gauge-value" id="perf-disk">--%</div>
+              <div class="gauge-label">Disco</div>
+            </div>
+          </div>
+          <p class="subtitle" id="perf-mem-detail"></p>
+          <h3 class="section-title">Processos (por uso de memória)</h3>
+          <ul id="perf-process-list" class="category-list scroll-area"></ul>
+        </section>
+
+        <section id="tab-dispositivos" class="tab-panel">
+          <h1>Dispositivos USB</h1>
+          <p class="subtitle">Status dos dispositivos USB conectados (pendrives, mouse, teclado, webcam, etc).</p>
+
+          <div class="toolbar">
+            <label class="select-all">
+              <input type="checkbox" id="only-errors" />
+              Mostrar apenas com erro
+            </label>
+            <div class="toolbar-buttons">
+              <button id="btn-scan-devices" class="secondary">Atualizar</button>
+              <button id="btn-open-devmgmt" class="secondary">Abrir Gerenciador de Dispositivos</button>
+            </div>
+          </div>
+
+          <ul id="device-list" class="category-list scroll-area"></ul>
+          <div id="device-status" class="status"></div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
